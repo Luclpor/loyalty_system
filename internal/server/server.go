@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Luclpor/loyalty_system.git/internal/config"
+	"github.com/Luclpor/loyalty_system.git/internal/config/db"
 	"github.com/Luclpor/loyalty_system.git/internal/logger"
 	"github.com/Luclpor/loyalty_system.git/internal/server/router"
 	"github.com/Luclpor/loyalty_system.git/internal/service/auth"
@@ -44,6 +45,11 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 	ur := postgres.NewUserRepository(pool)
+	err = db.RunMigrations(cfg.Postgres.DataBaseDSN)
+	if err != nil {
+		appLogger.Error("Could not run migrations", zap.Error(err))
+		return nil, err
+	}
 	authService, err = auth.NewAuthService([]byte(cfg.SecretKey), ur)
 	if err != nil {
 		appLogger.Error("Failed to create auth service", zap.Error(err))
