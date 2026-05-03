@@ -22,7 +22,7 @@ type Config struct {
 }
 
 type HTTPServer struct {
-	ServerAddress string `env:"SERVER_ADDRESS"`
+	ServerAddress string `env:"RUN_ADDRESS"`
 	BaseURL       string `env:"BASE_URL"`
 	StorageType   string `env:"STORAGE_TYPE"`
 	Postgres      *PostgresConfig
@@ -31,7 +31,7 @@ type HTTPServer struct {
 }
 
 type PostgresConfig struct {
-	DataBaseDSN       string        `env:"DATABASE_DSN" envDefault:"postgres://postgres:mysecretpassword@localhost:5432/url_shortener?sslmode=disable"`
+	DataBaseDSN       string        `env:"DATABASE_URI" envDefault:"postgres://postgres:mysecretpassword@localhost:5432/url_shortener?sslmode=disable"`
 	MaxConns          int32         `env:"MAX_CONNS"`
 	MinConns          int32         `env:"MIN_CONNS"`
 	MaxConnLifetime   time.Duration `env:"MAX_CONN_LIFETIME"`
