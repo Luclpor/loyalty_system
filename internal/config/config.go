@@ -40,7 +40,7 @@ type PostgresConfig struct {
 }
 
 func InitConfig() (*Config, error) {
-	h := flag.String("a", "localhost:8081", "host address server")
+	h := flag.String("a", "localhost:8080", "host address server")
 	d := flag.String("d", "", "dsn connection to db")
 
 	flag.Parse()
