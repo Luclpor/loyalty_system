@@ -22,12 +22,12 @@ type Config struct {
 }
 
 type HTTPServer struct {
-	ServerAddress string `env:"RUN_ADDRESS"`
-	BaseURL       string `env:"BASE_URL"`
-	StorageType   string `env:"STORAGE_TYPE"`
-	Postgres      *PostgresConfig
-	Timeout       time.Duration `env:"TIMEOUT" envDefault:"1555s"`
-	IdleTimeout   time.Duration
+	ServerAddress        string `env:"RUN_ADDRESS"`
+	BaseURL              string `env:"BASE_URL"`
+	AccrualSystemAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
+	Postgres             *PostgresConfig
+	Timeout              time.Duration `env:"TIMEOUT" envDefault:"1555s"`
+	IdleTimeout          time.Duration
 }
 
 type PostgresConfig struct {

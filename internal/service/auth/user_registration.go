@@ -32,12 +32,11 @@ func (ua *UserAuth) RegisterUser(ctx context.Context, user *apiModel.User, appLo
 		return nil, err
 	}
 
-	u, err := ua.userRepo.CreateUser(ctx, user.Login, hashedPass)
+	u, err := ua.userRepo.CreateUserAndBalance(ctx, user.Login, hashedPass)
 	if err != nil {
 		appLogger.Error("Failed to create user", zap.Error(err))
 		return nil, err
 	}
-
 	return u, nil
 }
 

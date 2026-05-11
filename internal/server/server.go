@@ -14,6 +14,9 @@ import (
 	"github.com/Luclpor/loyalty_system.git/internal/logger"
 	"github.com/Luclpor/loyalty_system.git/internal/server/router"
 	"github.com/Luclpor/loyalty_system.git/internal/service/auth"
+	"github.com/Luclpor/loyalty_system.git/internal/service/order"
+	"github.com/Luclpor/loyalty_system.git/internal/service/order/worker"
+	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	"go.uber.org/zap"
 )
@@ -44,18 +47,23 @@ func NewServer() (*Server, error) {
 		appLogger.Error("Failed to connect to database", zap.Error(err))
 		return nil, err
 	}
-	ur := postgres.NewUserRepository(pool)
+	br := postgres.NewBalanceRepository(pool)
+	ur := postgres.NewUserRepository(pool, br)
+	or := postgres.NewOrderRepository(pool)
 	err = db.RunMigrations(cfg.Postgres.DataBaseDSN)
 	if err != nil {
 		appLogger.Error("Could not run migrations", zap.Error(err))
-		return nil, err
+		//return nil, err
 	}
 	authService, err = auth.NewAuthService([]byte(cfg.SecretKey), ur)
 	if err != nil {
 		appLogger.Error("Failed to create auth service", zap.Error(err))
 		return nil, err
 	}
-	chiRouter, err := router.NewRouter(cfg, authService, appLogger)
+	balanceManager := userBalance.NewBalanceManager()
+	orderManager := order.NewOrderManager(cfg.AccrualSystemAddress, or)
+	workerOrder := worker.NewWorkerOrder()
+	chiRouter, err := router.NewRouter(cfg, authService, orderManager, appLogger)
 	if err != nil {
 		appLogger.Error("Could not initialize router", zap.Error(err))
 		return nil, err

@@ -11,21 +11,34 @@ import (
 )
 
 type UserRepository struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	balanceRep *BalanceRepository
 }
 
-func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
-	return &UserRepository{pool}
+func NewUserRepository(pool *pgxpool.Pool, br *BalanceRepository) *UserRepository {
+	return &UserRepository{pool, br}
 }
 
-func (ur *UserRepository) CreateUser(ctx context.Context, login string, hashPassword string) (*models.User, error) {
+func (ur *UserRepository) CreateUserAndBalance(ctx context.Context, login string, hashPassword string) (*models.User, error) {
+	tr, err := ur.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
 	const query = `
 		INSERT INTO loyalty_system.user (login, password)
 		VALUES ($1, $2)
 		RETURNING id, login, password
 	`
 	var u models.User
-	err := ur.pool.QueryRow(ctx, query, login, hashPassword).Scan(&u.ID, &u.Login, &u.Password)
+	err = tr.QueryRow(ctx, query, login, hashPassword).Scan(&u.ID, &u.Login, &u.Password)
+	if err != nil {
+		return nil, err
+	}
+	err = ur.balanceRep.CreateNewBalance(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	err = tr.Commit(ctx)
 	if err != nil {
 		return nil, err
 	}
