@@ -40,7 +40,7 @@ func (r *BalanceRepository) UpdateBalance(ctx context.Context, updEntity *models
 	if err != nil {
 		return nil, err
 	}
-	const query = `UPDATE TABLE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
+	const query = `UPDATE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
 	resultEntity := models.Balance{}
 	b := models.Balance{}
 	err = tr.QueryRow(ctx, query, updEntity.Point, updEntity.UserID).Scan(&b.UserID, &b.Point)
