@@ -69,3 +69,20 @@ func GetWithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userB
 		render.JSON(w, r, withdraws)
 	}
 }
+
+func GetUserBalanceHandler(authService *auth.UserAuth, balanceManager *userBalance.BalanceManager, appLogger *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, err := authService.GetUserFromContext(r.Context())
+		if err != nil {
+			appLogger.Error("failed to get user from context", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		balance, err := balanceManager.GetUserBalance(r.Context(), u.ID)
+		if err != nil {
+			appLogger.Error("error getting balance", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		render.JSON(w, r, balance)
+	}
+}

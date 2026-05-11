@@ -2,6 +2,7 @@ package userBalance
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	"github.com/Luclpor/loyalty_system.git/internal/dto"
@@ -23,6 +24,7 @@ type BalanceUpdater interface {
 
 type BalanceReader interface {
 	GetUserBalance(ctx context.Context, userID uuid.UUID) (*models.Balance, error)
+	GetUserBalanceHistoryNegativeTransaction(ctx context.Context, userID uuid.UUID) ([]models.HistoryBalanceOperation, error)
 	GetWithDraws(ctx context.Context, userID uuid.UUID) ([]models.HistoryBalanceOperation, error)
 	GetUsersBalances(ctx context.Context, userIDs []uuid.UUID) ([]models.Balance, error)
 }
@@ -72,8 +74,22 @@ func (bm *BalanceManager) BulkUpdateBalance(ctx context.Context, dtos []balanceD
 	return nil
 }
 
-func (bm *BalanceManager) GetUserBalance(ctx context.Context, userID uuid.UUID) (*balanceDto.BalanceDto, error) {
-	panic("implement me")
+func (bm *BalanceManager) GetUserBalance(ctx context.Context, userID uuid.UUID) (*apiModel.ReadBalanceApi, error) {
+	userBalance, err := bm.balanceReader.GetUserBalance(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	operations, err := bm.balanceReader.GetUserBalanceHistoryNegativeTransaction(ctx, userID)
+	if err != nil && !errors.Is(err, appErrors.ErrorNotFoundRows) {
+		return nil, err
+	}
+	var allWithdrawn float64 = 0
+	for _, op := range operations {
+		if op.AmountTransactionPoint != nil {
+			allWithdrawn += *op.AmountTransactionPoint
+		}
+	}
+	return &apiModel.ReadBalanceApi{Current: userBalance.Point, Withdrawn: allWithdrawn}, nil
 }
 
 func (bm *BalanceManager) WithDrawUserBalance(ctx context.Context, api *apiModel.BalanceApi, user *dto.UserDto, appLogger *zap.Logger) (*withdraw.WithdrawDto, error) {

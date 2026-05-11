@@ -144,6 +144,31 @@ func (r *BalanceRepository) GetUserBalance(ctx context.Context, userID uuid.UUID
 	return &ent, nil
 }
 
+func (r *BalanceRepository) GetUserBalanceHistoryNegativeTransaction(ctx context.Context, userID uuid.UUID) ([]models.HistoryBalanceOperation, error) {
+	const query = `SELECT user_id, order_id, is_positive_transaction, amount_transaction_point FROM loyalty_system.history_balance_operation WHERE user_id = $1 AND is_positive_transaction = false;`
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var operations []models.HistoryBalanceOperation
+	for rows.Next() {
+		hisOpe := models.HistoryBalanceOperation{}
+		err = rows.Scan(&hisOpe.UserID, &hisOpe.OrderID, &hisOpe.IsPositiveTransaction, &hisOpe.AmountTransactionPoint)
+		if err != nil {
+			return nil, err
+		}
+		operations = append(operations, hisOpe)
+	}
+	err = rows.Err()
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.ErrorNotFoundRows
+		}
+	}
+	return operations, nil
+}
+
 func (r *BalanceRepository) GetUsersBalances(ctx context.Context, userIDs []uuid.UUID) ([]models.Balance, error) {
 	const query = `SELECT user_id, point FROM loyalty_system.balance WHERE user_id = ANY($1);`
 	rows, err := r.pool.Query(ctx, query, userIDs)
