@@ -126,14 +126,14 @@ func (bm *BalanceManager) WithDrawUserBalance(ctx context.Context, api *apiModel
 	return &withdraw.WithdrawDto{UserID: ent.UserID, Sum: *ent.HistoryBalanceOperation.AmountTransactionPoint}, nil
 }
 
-func (bm *BalanceManager) GetUserWithDraws(ctx context.Context, userID uuid.UUID) ([]withdraw.WithdrawDto, error) {
+func (bm *BalanceManager) GetUserWithDraws(ctx context.Context, userID uuid.UUID) ([]apiModel.ReadWithdrawApi, error) {
 	resEnts, err := bm.balanceReader.GetWithDraws(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	withdraws := make([]withdraw.WithdrawDto, len(resEnts))
-	for _, resEnt := range resEnts {
-		withdraws = append(withdraws, withdraw.WithdrawDto{UserID: userID, Sum: *resEnt.AmountTransactionPoint, ProcessedAt: &resEnt.CreatedAt})
+	withdraws := make([]apiModel.ReadWithdrawApi, len(resEnts))
+	for i, resEnt := range resEnts {
+		withdraws[i] = apiModel.ReadWithdrawApi{OrderID: resEnt.OrderID, Sum: *resEnt.AmountTransactionPoint, ProcessedAt: &resEnt.CreatedAt}
 	}
 	return withdraws, nil
 }

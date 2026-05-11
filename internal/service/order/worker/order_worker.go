@@ -57,7 +57,6 @@ func (p *WorkerOrder) ProcessingOrders() {
 		for range t.C {
 			p.mu.Lock()
 			if len(p.resultAccOrders) == 0 {
-				p.appLogger.Info("empty new orders")
 				p.mu.Unlock()
 				continue
 			}

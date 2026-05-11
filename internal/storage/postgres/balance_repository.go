@@ -108,7 +108,7 @@ func (r *BalanceRepository) CreateNewBalanceHistoryTransaction(ctx context.Conte
 }
 
 func (r *BalanceRepository) GetWithDraws(ctx context.Context, userID uuid.UUID) ([]models.HistoryBalanceOperation, error) {
-	const query = `SELECT user_id, amount_transaction_point, created_at FROM loyalty_system.history_balance_operation WHERE user_id = $1 and is_positive_transaction = false
+	const query = `SELECT order_id, amount_transaction_point, created_at FROM loyalty_system.history_balance_operation WHERE user_id = $1 and is_positive_transaction = false
 		  ORDER BY created_at DESC;`
 	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
@@ -118,7 +118,7 @@ func (r *BalanceRepository) GetWithDraws(ctx context.Context, userID uuid.UUID) 
 	var operations []models.HistoryBalanceOperation
 	for rows.Next() {
 		hisOpe := models.HistoryBalanceOperation{}
-		err = rows.Scan(&hisOpe.UserID, &hisOpe.AmountTransactionPoint, &hisOpe.CreatedAt)
+		err = rows.Scan(&hisOpe.OrderID, &hisOpe.AmountTransactionPoint, &hisOpe.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
