@@ -8,6 +8,7 @@ import (
 	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -88,9 +89,9 @@ func (or *OrderRepository) UpdateOrdersStatus(ctx context.Context, entToUpd []mo
 }
 
 func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
-	const query = `SELECT o.id, o.user_id, o.status, o.created_at, hbo.amount_transaction_point FROM loyalty_system.order o
+	const query = `SELECT o.id, o.user_id, o.status, o.created_at, hbo.id, hbo.amount_transaction_point, hbo.is_positive_transaction FROM loyalty_system.order o
 				   LEFT JOIN loyalty_system.history_balance_operation hbo on hbo.order_id = o.id  
-                                       WHERE o.user_id = $1 and hbo.is_positive_transaction = true`
+                                       WHERE o.user_id = $1`
 	orders := make([]models.Order, 0)
 	rows, err := or.pool.Query(ctx, query, userID)
 	if err != nil {
@@ -99,12 +100,19 @@ func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UU
 	defer rows.Close()
 	for rows.Next() {
 		order := models.Order{}
-		hisTr := models.HistoryBalanceOperation{}
-		err = rows.Scan(&order.ID, &order.UserID, &order.Status, &order.CreatedAt, &hisTr.AmountTransactionPoint)
+		var hisId pgtype.Int4
+		var amount *float64
+		var isPositive pgtype.Bool
+		err = rows.Scan(&order.ID, &order.UserID, &order.Status, &order.CreatedAt, &hisId, &amount, &isPositive)
 		if err != nil {
 			return nil, err
 		}
-		order.Transaction = &hisTr
+		if hisId.Valid {
+			order.Transaction = &models.HistoryBalanceOperation{
+				AmountTransactionPoint: amount,
+				IsPositiveTransaction:  isPositive.Bool,
+			}
+		}
 		orders = append(orders, order)
 	}
 	if err = rows.Err(); err != nil {

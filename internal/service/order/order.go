@@ -88,13 +88,16 @@ func (om *OrderManager) GetUserOrders(ctx context.Context, userID uuid.UUID) ([]
 	}
 	orders := make([]OrderDto, len(ents))
 	for i, ent := range ents {
+		if ent.Transaction != nil && ent.Transaction.IsPositiveTransaction == false {
+			continue
+		}
 		orders[i] = OrderDto{
 			OrderNumber: ent.ID,
 			UserID:      ent.UserID,
 			Status:      string(ent.Status),
 			UploadedAt:  ent.CreatedAt,
 		}
-		if ent.Transaction.AmountTransactionPoint != nil {
+		if ent.Transaction != nil && ent.Transaction.AmountTransactionPoint != nil {
 			orders[i].Point = *ent.Transaction.AmountTransactionPoint
 		}
 	}
