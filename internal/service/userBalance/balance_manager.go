@@ -133,7 +133,7 @@ func (bm *BalanceManager) GetUserWithDraws(ctx context.Context, userID uuid.UUID
 	}
 	withdraws := make([]apiModel.ReadWithdrawApi, len(resEnts))
 	for i, resEnt := range resEnts {
-		withdraws[i] = apiModel.ReadWithdrawApi{OrderID: resEnt.OrderID, Sum: *resEnt.AmountTransactionPoint, ProcessedAt: &resEnt.CreatedAt}
+		withdraws[i] = apiModel.ReadWithdrawApi{OrderID: strconv.FormatInt(resEnt.OrderID, 10), Sum: *resEnt.AmountTransactionPoint, ProcessedAt: &resEnt.CreatedAt}
 	}
 	return withdraws, nil
 }
