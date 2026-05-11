@@ -13,16 +13,21 @@ import (
 
 type BalanceRepository struct {
 	pool *pgxpool.Pool
-	tx   *pgx.Tx
+	tx   pgx.Tx
 }
 
 func NewBalanceRepository(pool *pgxpool.Pool) *BalanceRepository {
 	return &BalanceRepository{pool: pool}
 }
 
-func (r *BalanceRepository) CreateNewBalance(ctx context.Context, userID uuid.UUID) error {
+func (r *BalanceRepository) CreateNewBalance(ctx context.Context, tr pgx.Tx, userID uuid.UUID) error {
 	const query = `INSERT INTO loyalty_system.balance (user_id) VALUES ($1)`
-	_, err := r.pool.Exec(ctx, query, userID)
+	var err error
+	if tr != nil {
+		_, err = tr.Exec(ctx, query, userID)
+	} else {
+		_, err = r.pool.Exec(ctx, query, userID)
+	}
 	if err != nil {
 		return err
 	}
@@ -31,7 +36,7 @@ func (r *BalanceRepository) CreateNewBalance(ctx context.Context, userID uuid.UU
 
 func (r *BalanceRepository) UpdateBalance(ctx context.Context, updEntity *models.Balance) (*models.Balance, error) {
 	tr, err := r.pool.Begin(ctx)
-	r.tx = &tr
+	r.tx = tr
 	if err != nil {
 		return nil, err
 	}
@@ -54,33 +59,47 @@ func (r *BalanceRepository) UpdateBalance(ctx context.Context, updEntity *models
 	return &resultEntity, nil
 }
 
-func (r *BalanceRepository) BulkUpdateBalancesByUserIDs(ctx context.Context, mods []models.Balance) ([]models.Balance, error) {
-	const query = `UPDATE TABLE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
-	balanceModels := []models.Balance{}
-	for _, mod := range mods {
-		b := models.Balance{}
-		err := r.pool.QueryRow(ctx, query, mod.Point, mod.UserID).Scan(&b.UserID, &b.Point)
+func (r *BalanceRepository) BulkUpdateBalances(ctx context.Context, entToUpd []models.Balance) ([]models.Balance, error) {
+	tr, err := r.pool.Begin(ctx)
+	r.tx = tr
+	if err != nil {
+		return nil, err
+	}
+	const query = `UPDATE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
+	b := []models.Balance{}
+	for _, entry := range entToUpd {
+		entity := models.Balance{}
+		err = tr.QueryRow(ctx, query, entry.Point, entry.UserID).Scan(&entity.UserID, &entity.Point)
 		if err != nil {
 			return nil, err
 		}
+		hisResEntity, err := r.CreateNewBalanceHistoryTransaction(ctx, entry.HistoryBalanceOperation)
+		if err != nil {
+			return nil, err
+		}
+		entity.HistoryBalanceOperation = hisResEntity
+		b = append(b, entity)
 	}
-	return balanceModels, nil
+	err = tr.Commit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func (r *BalanceRepository) CreateNewBalanceHistoryTransaction(ctx context.Context, hisBalanceEntity *models.HistoryBalanceOperation) (*models.HistoryBalanceOperation, error) {
-	const query = `INSERT INTO loyalty_system.history_balance_operation (user_id, is_positive_transaction, amount_transaction_point, balance_points) 
-			VALUES ($1, $2, $3, $4) returning user_id, is_positive_transaction, amount_transaction_point, balance_points;`
+	const query = `INSERT INTO loyalty_system.history_balance_operation (user_id, order_id, is_positive_transaction, amount_transaction_point, balance_points) 
+			VALUES ($1, $2, $3, $4, $5) returning user_id, order_id, is_positive_transaction, amount_transaction_point, balance_points;`
 	entity := models.HistoryBalanceOperation{}
 	var err error
 	if r.tx != nil {
-		tx := *r.tx
-		err = tx.
-			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
-			Scan(&entity.UserID, entity.IsPositiveTransaction, entity.AmountTransactionPoint, entity.BalancePoint)
+		err = r.tx.
+			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.OrderID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
+			Scan(&entity.UserID, &entity.OrderID, &entity.IsPositiveTransaction, &entity.AmountTransactionPoint, &entity.BalancePoint)
 	} else {
 		err = r.pool.
-			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
-			Scan(&entity.UserID, entity.IsPositiveTransaction, entity.AmountTransactionPoint, entity.BalancePoint)
+			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.OrderID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
+			Scan(&entity.UserID, &entity.OrderID, &entity.IsPositiveTransaction, &entity.AmountTransactionPoint, &entity.BalancePoint)
 	}
 	if err != nil {
 		return nil, err
@@ -113,4 +132,40 @@ func (r *BalanceRepository) GetWithDraws(ctx context.Context, userID uuid.UUID) 
 		return nil, err
 	}
 	return operations, nil
+}
+
+func (r *BalanceRepository) GetUserBalance(ctx context.Context, userID uuid.UUID) (*models.Balance, error) {
+	const query = `SELECT user_id, point FROM loyalty_system.balance WHERE user_id = $1;`
+	ent := models.Balance{}
+	err := r.pool.QueryRow(ctx, query, userID).Scan(&ent.UserID, &ent.Point)
+	if err != nil {
+		return nil, err
+	}
+	return &ent, nil
+}
+
+func (r *BalanceRepository) GetUsersBalances(ctx context.Context, userIDs []uuid.UUID) ([]models.Balance, error) {
+	const query = `SELECT user_id, point FROM loyalty_system.balance WHERE user_id = ANY($1);`
+	rows, err := r.pool.Query(ctx, query, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var balances []models.Balance
+	for rows.Next() {
+		bal := models.Balance{}
+		err = rows.Scan(&bal.UserID, &bal.Point)
+		if err != nil {
+			return nil, err
+		}
+		balances = append(balances, bal)
+	}
+	err = rows.Err()
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.ErrorNotFoundRows
+		}
+		return nil, err
+	}
+	return balances, nil
 }

@@ -16,7 +16,7 @@ type UserRepository struct {
 }
 
 func NewUserRepository(pool *pgxpool.Pool, br *BalanceRepository) *UserRepository {
-	return &UserRepository{pool, br}
+	return &UserRepository{pool: pool, balanceRep: br}
 }
 
 func (ur *UserRepository) CreateUserAndBalance(ctx context.Context, login string, hashPassword string) (*models.User, error) {
@@ -24,6 +24,7 @@ func (ur *UserRepository) CreateUserAndBalance(ctx context.Context, login string
 	if err != nil {
 		return nil, err
 	}
+	defer tr.Rollback(ctx)
 	const query = `
 		INSERT INTO loyalty_system.user (login, password)
 		VALUES ($1, $2)
@@ -34,7 +35,7 @@ func (ur *UserRepository) CreateUserAndBalance(ctx context.Context, login string
 	if err != nil {
 		return nil, err
 	}
-	err = ur.balanceRep.CreateNewBalance(ctx, u.ID)
+	err = ur.balanceRep.CreateNewBalance(ctx, tr, u.ID)
 	if err != nil {
 		return nil, err
 	}

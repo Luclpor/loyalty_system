@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Luclpor/loyalty_system.git/internal/service/order"
+	"github.com/Luclpor/loyalty_system.git/internal/service/order/common"
 	"github.com/Luclpor/loyalty_system.git/internal/service/order/dto/accrualStatusOrder"
 	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance"
 	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance/balanceDto"
@@ -17,22 +19,22 @@ import (
 )
 
 type WorkerOrder struct {
-	numWorkers          int
-	orderChan           chan order.OrderDto
-	resultAccOrders     []accrualStatusOrder.OrderDto
-	accrualSystemStatus string
-	balanceManager      *userBalance.BalanceManager
-	orderManager        *order.OrderManager
-	appLogger           *zap.Logger
+	mu                   sync.Mutex
+	numWorkers           int
+	resultAccOrders      []accrualStatusOrder.OrderDto
+	accrualSystemAddress string
+	balanceManager       *userBalance.BalanceManager
+	orderManager         *order.OrderManager
+	appLogger            *zap.Logger
 }
 
-func NewWorkerOrder(balanceManager *userBalance.BalanceManager, orderManager *order.OrderManager, appLogger *zap.Logger) *WorkerOrder {
+func NewWorkerOrder(accrualSysAddress string, balanceManager *userBalance.BalanceManager, orderManager *order.OrderManager, appLogger *zap.Logger) *WorkerOrder {
 	return &WorkerOrder{
-		numWorkers:     5,
-		orderChan:      make(chan order.OrderDto),
-		balanceManager: balanceManager,
-		appLogger:      appLogger,
-		orderManager:   orderManager,
+		accrualSystemAddress: accrualSysAddress,
+		numWorkers:           5,
+		balanceManager:       balanceManager,
+		appLogger:            appLogger,
+		orderManager:         orderManager,
 	}
 }
 
@@ -50,24 +52,36 @@ func (p *WorkerOrder) ProcessingOrders() {
 		go p.WorkerOrder(jobs, resultJob)
 	}
 	go func() {
-		t := time.NewTimer(5 * time.Second)
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			p.mu.Lock()
+			if len(p.resultAccOrders) == 0 {
+				p.appLogger.Info("empty new orders")
+				p.mu.Unlock()
+				continue
+			}
+			orders := append([]accrualStatusOrder.OrderDto(nil), p.resultAccOrders...)
+			p.resultAccOrders = p.resultAccOrders[:0]
+			p.mu.Unlock()
+			p.HandleEvaluatingOrders(orders)
+		}
+	}()
+	go func() {
 		for {
 			select {
-			case <-t.C:
-				if len(p.resultAccOrders) == 0 {
+			case j := <-p.orderManager.NewOrderChan:
+				jobs <- *j
+			case res := <-resultJob:
+				if res == nil {
 					continue
 				}
+				p.mu.Lock()
+				p.resultAccOrders = append(p.resultAccOrders, *res)
+				p.mu.Unlock()
 			}
 		}
 	}()
-	for {
-		select {
-		case j := <-p.orderChan:
-			jobs <- j
-		case res := <-resultJob:
-			p.resultAccOrders = append(p.resultAccOrders, *res)
-		}
-	}
 }
 
 func (p *WorkerOrder) HandleEvaluatingOrders(orders []accrualStatusOrder.OrderDto) {
@@ -77,7 +91,7 @@ func (p *WorkerOrder) HandleEvaluatingOrders(orders []accrualStatusOrder.OrderDt
 		num, _ := strconv.Atoi(o.Order)
 		if o.Status == accrualStatusOrder.PROCESSED {
 			balanceUpdOrders = append(balanceUpdOrders, balanceDto.BalanceDto{
-				OrderID: num,
+				OrderID: int64(num),
 				Point:   o.Accrual,
 				UserID:  o.UserID,
 			})
@@ -85,48 +99,44 @@ func (p *WorkerOrder) HandleEvaluatingOrders(orders []accrualStatusOrder.OrderDt
 
 		updatedOrders = append(updatedOrders, models.Order{
 			ID:     num,
-			Status: convertStatus(o.Status),
+			Status: common.ConvertStatus(o.Status),
 		})
 	}
 	err := p.balanceManager.BulkUpdateBalance(context.TODO(), balanceUpdOrders)
 	if err != nil {
 		p.appLogger.Error("Error updating balance", zap.Error(err))
+		return
 	}
 	err = p.orderManager.UpdateOrders(context.TODO(), updatedOrders)
 	if err != nil {
 		p.appLogger.Error("Error updating orders", zap.Error(err))
-	}
-}
-
-func convertStatus(statusAccr accrualStatusOrder.AccrualSystemStatus) models.OrderStatus {
-	switch statusAccr {
-	case accrualStatusOrder.REGISTERED, accrualStatusOrder.PROCESSING:
-		return models.PROCESSING
-	case accrualStatusOrder.PROCESSED:
-		return models.PROCESSED
-	case accrualStatusOrder.INVALID:
-		return models.INVALID
-	default:
-		return models.INVALID
+		return
 	}
 }
 
 func (p *WorkerOrder) GetResultOrderEvaluating(order order.OrderDto) *accrualStatusOrder.OrderDto {
-	u, err := url.JoinPath(p.accrualSystemStatus, strconv.FormatInt(int64(order.OrderNumber), 10))
+	ordNum := strconv.FormatInt(int64(order.OrderNumber), 10)
+	u, err := url.JoinPath(p.accrualSystemAddress, "api/orders", ordNum)
 	if err != nil {
 		panic(err)
 	}
-	resp, err := http.Get(u)
-	if err != nil {
-		panic(err)
+	client := &http.Client{
+		Timeout: time.Second * 15,
 	}
+	resp, err := client.Get(u)
+	if err != nil {
+		p.appLogger.Error("Error getting order", zap.Error(err))
+		return nil
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 
 	}
 	model := &accrualStatusOrder.OrderDto{}
 	err = json.NewDecoder(resp.Body).Decode(&model)
 	if err != nil {
-		panic(err)
+		p.appLogger.Error("error decode resp from accrual system order", zap.Error(err))
+		return nil
 	}
 	model.UserID = order.UserID
 	return model

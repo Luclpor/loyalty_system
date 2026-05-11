@@ -2,6 +2,7 @@ package userBalance
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/Luclpor/loyalty_system.git/internal/dto"
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
@@ -9,19 +10,21 @@ import (
 	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance/withdraw"
 	"github.com/Luclpor/loyalty_system.git/internal/service/validator"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
+	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
 type BalanceUpdater interface {
-	BulkUpdateBalancesByUserIDs(ctx context.Context, userIDs []models.Balance) ([]models.Balance, error)
+	BulkUpdateBalances(ctx context.Context, userIDs []models.Balance) ([]models.Balance, error)
 	UpdateBalance(ctx context.Context, updEntity *models.Balance) (*models.Balance, error)
 }
 
 type BalanceReader interface {
-	GetUserBalanceByUserID(ctx context.Context, userID uuid.UUID) (*models.Balance, error)
+	GetUserBalance(ctx context.Context, userID uuid.UUID) (*models.Balance, error)
 	GetWithDraws(ctx context.Context, userID uuid.UUID) ([]models.HistoryBalanceOperation, error)
+	GetUsersBalances(ctx context.Context, userIDs []uuid.UUID) ([]models.Balance, error)
 }
 
 type BalanceManager struct {
@@ -29,19 +32,40 @@ type BalanceManager struct {
 	balanceReader  BalanceReader
 }
 
-func NewBalanceManager(bu BalanceUpdater, br BalanceReader) *BalanceManager {
+func NewBalanceManager(br *postgres.BalanceRepository) *BalanceManager {
 	return &BalanceManager{
-		balanceUpdater: bu,
+		balanceUpdater: br,
 		balanceReader:  br,
 	}
 }
 
 func (bm *BalanceManager) BulkUpdateBalance(ctx context.Context, dtos []balanceDto.BalanceDto) error {
-	balModels := make([]models.Balance, 0)
-	for _, dto := range dtos {
-		balModels = append(balModels, models.Balance{Point: dto.Point, UserID: dto.UserID})
+	userBalanceDtos := make(map[uuid.UUID]balanceDto.BalanceDto, 0)
+	userIDs := make([]uuid.UUID, len(dtos))
+	for i, d := range dtos {
+		userBalanceDtos[d.UserID] = d
+		userIDs[i] = d.UserID
 	}
-	_, err := bm.balanceUpdater.BulkUpdateBalancesByUserIDs(ctx, balModels)
+	userBalances, err := bm.balanceReader.GetUsersBalances(ctx, userIDs)
+	if err != nil {
+		return err
+	}
+	for i, userBalance := range userBalances {
+		d := userBalanceDtos[userBalance.UserID]
+		p := userBalance.Point
+		if d.Point != nil {
+			p = *d.Point + userBalance.Point
+		}
+		userBalances[i].Point = p
+		userBalances[i].HistoryBalanceOperation = &models.HistoryBalanceOperation{
+			UserID:                 userBalance.UserID,
+			IsPositiveTransaction:  true,
+			AmountTransactionPoint: d.Point,
+			BalancePoint:           p,
+			OrderID:                d.OrderID,
+		}
+	}
+	_, err = bm.balanceUpdater.BulkUpdateBalances(ctx, userBalances)
 	if err != nil {
 		return err
 	}
@@ -57,23 +81,25 @@ func (bm *BalanceManager) WithDrawUserBalance(ctx context.Context, api *apiModel
 	if !isValid {
 		return nil, appErrors.ErrorInvalidOrderNum
 	}
-	ub, err := bm.balanceReader.GetUserBalanceByUserID(ctx, user.ID)
+	ub, err := bm.balanceReader.GetUserBalance(ctx, user.ID)
 	if err != nil {
 		return nil, err
 	}
-	if *ub.Point < float64(api.Sum) {
+	if ub.Point < float64(api.Sum) {
 		return nil, appErrors.ErrorNotEnoughBalance
 	}
+	orderNum, _ := strconv.Atoi(api.Order)
 	amTrPoint := float64(api.Sum)
-	p := *ub.Point - float64(api.Sum)
+	p := ub.Point - float64(api.Sum)
 	updEntity := &models.Balance{
 		UserID: user.ID,
-		Point:  &p,
+		Point:  p,
 		HistoryBalanceOperation: &models.HistoryBalanceOperation{
 			UserID:                 user.ID,
-			BalancePoint:           &p,
+			BalancePoint:           p,
 			IsPositiveTransaction:  false,
 			AmountTransactionPoint: &amTrPoint,
+			OrderID:                int64(orderNum),
 		},
 	}
 	ent, err := bm.balanceUpdater.UpdateBalance(ctx, updEntity)

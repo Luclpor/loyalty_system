@@ -2,8 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
+	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,6 +29,19 @@ func (or *OrderRepository) SaveOrder(ctx context.Context, order *models.Order) e
 		return err
 	}
 	return nil
+}
+
+func (or *OrderRepository) GetOrderByID(ctx context.Context, orderID int64) (*models.Order, error) {
+	const query = `SELECT id, user_id, status, created_at FROM loyalty_system.order WHERE id = $1`
+	order := &models.Order{}
+	err := or.pool.QueryRow(ctx, query, orderID).Scan(&order.ID, &order.UserID, &order.Status, &order.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.ErrorNotFoundRows
+		}
+		return nil, err
+	}
+	return order, nil
 }
 
 func (or *OrderRepository) GetOrderByStatus(ctx context.Context, status string) ([]models.Order, error) {
@@ -49,4 +66,52 @@ func (or *OrderRepository) GetOrderByStatus(ctx context.Context, status string) 
 		return nil, err
 	}
 	return ords, nil
+}
+
+func (or *OrderRepository) UpdateOrdersStatus(ctx context.Context, entToUpd []models.Order) error {
+	tr, err := or.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	const query = `UPDATE loyalty_system.order SET status = $1 WHERE id = $2;`
+	for _, ent := range entToUpd {
+		_, err = tr.Exec(ctx, query, ent.Status, ent.ID)
+		if err != nil {
+			return err
+		}
+	}
+	err = tr.Commit(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
+	const query = `SELECT o.id, o.user_id, o.status, o.created_at, hbo.amount_transaction_point FROM loyalty_system.order o
+				   LEFT JOIN loyalty_system.history_balance_operation hbo on hbo.order_id = o.id  
+                                       WHERE user_id = $1 and hbo.is_positive_transaction = true`
+	orders := make([]models.Order, 0)
+	rows, err := or.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		order := models.Order{}
+		hisTr := models.HistoryBalanceOperation{}
+		err = rows.Scan(&order.ID, &order.UserID, &order.Status, &order.CreatedAt, &hisTr.AmountTransactionPoint)
+		if err != nil {
+			return nil, err
+		}
+		order.Transaction = &hisTr
+		orders = append(orders, order)
+	}
+	if err = rows.Err(); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, appErrors.ErrorNotFoundRows
+		}
+		return nil, err
+	}
+	return orders, nil
 }

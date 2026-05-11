@@ -60,10 +60,11 @@ func NewServer() (*Server, error) {
 		appLogger.Error("Failed to create auth service", zap.Error(err))
 		return nil, err
 	}
-	balanceManager := userBalance.NewBalanceManager()
+	balanceManager := userBalance.NewBalanceManager(br)
 	orderManager := order.NewOrderManager(cfg.AccrualSystemAddress, or)
-	workerOrder := worker.NewWorkerOrder()
-	chiRouter, err := router.NewRouter(cfg, authService, orderManager, appLogger)
+	workerOrder := worker.NewWorkerOrder(cfg.AccrualSystemAddress, balanceManager, orderManager, appLogger)
+	workerOrder.ProcessingOrders()
+	chiRouter, err := router.NewRouter(cfg, authService, orderManager, balanceManager, appLogger)
 	if err != nil {
 		appLogger.Error("Could not initialize router", zap.Error(err))
 		return nil, err

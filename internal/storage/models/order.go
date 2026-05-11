@@ -16,8 +16,9 @@ const (
 )
 
 type Order struct {
-	ID        int
-	UserID    uuid.UUID
-	Status    OrderStatus
-	CreatedAt time.Time
+	ID          int
+	UserID      uuid.UUID
+	Status      OrderStatus
+	CreatedAt   time.Time
+	Transaction *HistoryBalanceOperation
 }
