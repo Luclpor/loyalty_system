@@ -90,7 +90,7 @@ func (or *OrderRepository) UpdateOrdersStatus(ctx context.Context, entToUpd []mo
 func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
 	const query = `SELECT o.id, o.user_id, o.status, o.created_at, hbo.amount_transaction_point FROM loyalty_system.order o
 				   LEFT JOIN loyalty_system.history_balance_operation hbo on hbo.order_id = o.id  
-                                       WHERE user_id = $1 and hbo.is_positive_transaction = true`
+                                       WHERE o.user_id = $1 and hbo.is_positive_transaction = true`
 	orders := make([]models.Order, 0)
 	rows, err := or.pool.Query(ctx, query, userID)
 	if err != nil {

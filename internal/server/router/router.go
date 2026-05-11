@@ -30,7 +30,7 @@ func NewRouter(cfg *config.Config, authService *auth.UserAuth, orderManager *ord
 
 	r.Route("/api/user", func(r chi.Router) {
 		r.Use(customMiddleware.Auth(authService, appLogger))
-		r.Post("/order", handler.CreateNewOrder(authService, orderManager, appLogger))
+		r.Post("/orders", handler.CreateNewOrder(authService, orderManager, appLogger))
 		r.Get("/orders", handler.GetUserOrdersHandler(authService, orderManager, appLogger))
 		r.Get("/userBalance", func(writer http.ResponseWriter, request *http.Request) {})
 		r.Post("/userBalance/withdraw", handler.WithdrawBalanceHandler(authService, balanceMan, appLogger))
