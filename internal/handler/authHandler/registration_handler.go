@@ -48,7 +48,7 @@ func UserRegistration(authService UserAuthenticationService, appLogger *zap.Logg
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			w.Header().Set("Authorization", token)
+			w.Header().Set("Authorization", "Bearer "+token)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -83,7 +83,7 @@ func UserLogin(authService UserAuthenticationService, appLogger *zap.Logger) htt
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Authorization", token)
+		w.Header().Set("Authorization", "Bearer "+token)
 		w.WriteHeader(http.StatusOK)
 	}
 }
