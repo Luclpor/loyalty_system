@@ -91,9 +91,11 @@ func (om *OrderManager) GetUserOrders(ctx context.Context, userID uuid.UUID) ([]
 		orders[i] = OrderDto{
 			OrderNumber: ent.ID,
 			UserID:      ent.UserID,
-			Point:       *ent.Transaction.AmountTransactionPoint,
 			Status:      string(ent.Status),
 			UploadedAt:  ent.CreatedAt,
+		}
+		if ent.Transaction.AmountTransactionPoint != nil {
+			orders[i].Point = *ent.Transaction.AmountTransactionPoint
 		}
 	}
 	return orders, nil
