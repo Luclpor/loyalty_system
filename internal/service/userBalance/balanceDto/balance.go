@@ -3,7 +3,7 @@ package balanceDto
 import "github.com/google/uuid"
 
 type BalanceDto struct {
-	OrderID int64
+	OrderID string
 	UserID  uuid.UUID
 	Point   *float64
 }

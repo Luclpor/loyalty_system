@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Luclpor/loyalty_system.git/internal/config"
-	"github.com/Luclpor/loyalty_system.git/internal/config/db"
 	"github.com/Luclpor/loyalty_system.git/internal/logger"
 	"github.com/Luclpor/loyalty_system.git/internal/server/router"
 	"github.com/Luclpor/loyalty_system.git/internal/service/auth"
@@ -27,6 +26,7 @@ const (
 
 type Server struct {
 	httpServer *http.Server
+	workerOrd  *worker.WorkerOrder
 	closers    []func() error
 	appLogger  *zap.Logger
 }
@@ -47,14 +47,13 @@ func NewServer() (*Server, error) {
 		appLogger.Error("Failed to connect to database", zap.Error(err))
 		return nil, err
 	}
+	closers = append(closers, func() error {
+		pool.Close()
+		return nil
+	})
 	br := postgres.NewBalanceRepository(pool)
 	ur := postgres.NewUserRepository(pool, br)
 	or := postgres.NewOrderRepository(pool)
-	err = db.RunMigrations(cfg.Postgres.DataBaseDSN)
-	if err != nil {
-		appLogger.Error("Could not run migrations", zap.Error(err))
-		//return nil, err
-	}
 	authService, err = auth.NewAuthService([]byte(cfg.SecretKey), ur)
 	if err != nil {
 		appLogger.Error("Failed to create auth service", zap.Error(err))
@@ -62,8 +61,11 @@ func NewServer() (*Server, error) {
 	}
 	balanceManager := userBalance.NewBalanceManager(br)
 	orderManager := order.NewOrderManager(cfg.AccrualSystemAddress, or)
-	workerOrder := worker.NewWorkerOrder(cfg.AccrualSystemAddress, balanceManager, orderManager, appLogger)
-	workerOrder.ProcessingOrders()
+	workerOrder, err := worker.NewWorkerOrder(cfg.AccrualSystemAddress, balanceManager, orderManager, appLogger)
+	if err != nil {
+		appLogger.Error("Failed to create worker order", zap.Error(err))
+		return nil, err
+	}
 	chiRouter, err := router.NewRouter(cfg, authService, orderManager, balanceManager, appLogger)
 	if err != nil {
 		appLogger.Error("Could not initialize router", zap.Error(err))
@@ -78,6 +80,7 @@ func NewServer() (*Server, error) {
 			WriteTimeout: cfg.Timeout,
 			IdleTimeout:  cfg.IdleTimeout,
 		},
+		workerOrder,
 		closers,
 		appLogger,
 	}
@@ -86,29 +89,52 @@ func NewServer() (*Server, error) {
 }
 
 func (s *Server) Start() error {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(quit)
+	appCtx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
 
+	s.workerOrd.ProcessingOrders(appCtx)
+	serverErr := make(chan error, 1)
 	go func() {
 		s.appLogger.Info("Server listening on",
 			zap.String("server_address", s.httpServer.Addr),
 		)
-		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.appLogger.Fatal("Error starting server", zap.Error(err))
+
+		if err := s.httpServer.ListenAndServe(); err != nil &&
+			!errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+			return
 		}
+		serverErr <- nil
 	}()
+	select {
+	case <-appCtx.Done():
+		s.appLogger.Info("Server shutting down...")
 
-	<-quit
-	s.appLogger.Info("Server shutting down...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-
-	if err := s.httpServer.Shutdown(ctx); err != nil {
+	case err := <-serverErr:
+		if err != nil {
+			s.appLogger.Error("server failed", zap.Error(err))
+			return err
+		}
+		return nil
+	}
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer httpCancel()
+	if err := s.httpServer.Shutdown(httpCtx); err != nil {
 		s.appLogger.Error("server forced to shutdown", zap.Error(err))
 		return err
 	}
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer workerCancel()
+
+	if err := s.workerOrd.Shutdown(workerCtx); err != nil {
+		s.appLogger.Error("worker order forced to shutdown", zap.Error(err))
+		return err
+	}
+
 	for _, closeFn := range s.closers {
 		if err := closeFn(); err != nil {
 			s.appLogger.Error("close function failed", zap.Error(err))

@@ -13,10 +13,11 @@ const (
 	PROCESSING OrderStatus = "PROCESSING"
 	INVALID    OrderStatus = "INVALID"
 	PROCESSED  OrderStatus = "PROCESSED"
+	UNKNOWN    OrderStatus = "UNKNOWN"
 )
 
 type Order struct {
-	ID          int
+	ID          string
 	UserID      uuid.UUID
 	Status      OrderStatus
 	CreatedAt   time.Time

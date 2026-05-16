@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Luclpor/loyalty_system.git/internal/service/order/dto/accrualStatusOrder"
+	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance/balanceDto"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +16,10 @@ type BalanceRepository struct {
 	pool *pgxpool.Pool
 	tx   pgx.Tx
 }
+
+var (
+	ErrorNotFoundBalanceRows = errors.New("balance not found")
+)
 
 func NewBalanceRepository(pool *pgxpool.Pool) *BalanceRepository {
 	return &BalanceRepository{pool: pool}
@@ -34,73 +39,74 @@ func (r *BalanceRepository) CreateNewBalance(ctx context.Context, tr pgx.Tx, use
 	return nil
 }
 
-func (r *BalanceRepository) UpdateBalance(ctx context.Context, updEntity *models.Balance) (*models.Balance, error) {
+func (r *BalanceRepository) SafetyWithdrawUpdateBalance(ctx context.Context, wdDto *balanceDto.WithdrawUpdateBalanceDto) (*models.HistoryBalanceOperation, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var point *float64
+	const query = `UPDATE loyalty_system.balance b SET b.point = b.point - $1 WHERE b.user_id = $2 AND b.point >= $1 RETURNING b.point;`
+	err = tx.QueryRow(ctx, query, wdDto.AmountPoint, wdDto.UserID).Scan(&point)
+	if err != nil {
+		return nil, err
+	}
+	if point == nil {
+		return nil, nil
+	}
+	hb, err := r.CreateNewBalanceHistoryTransaction(ctx, tx, &models.HistoryBalanceOperation{
+		UserID:                 wdDto.UserID,
+		AmountTransactionPoint: &wdDto.AmountPoint,
+		IsPositiveTransaction:  false,
+		BalancePoint:           *point,
+		OrderID:                wdDto.OrderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return hb, nil
+}
+
+func (r *BalanceRepository) SafetyUpdateBalance(ctx context.Context, entToUpdate *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
 	tr, err := r.pool.Begin(ctx)
-	r.tx = tr
 	if err != nil {
 		return nil, err
 	}
+	defer tr.Rollback(ctx)
 	const query = `UPDATE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
-	resultEntity := models.Balance{}
-	b := models.Balance{}
-	err = tr.QueryRow(ctx, query, updEntity.Point, updEntity.UserID).Scan(&b.UserID, &b.Point)
+	entity := models.Balance{}
+	err = tr.QueryRow(ctx, query, entToUpdate.Accrual, entToUpdate.UserID).Scan(&entity.UserID, &entity.Point)
 	if err != nil {
 		return nil, err
 	}
-	hisResEntity, err := r.CreateNewBalanceHistoryTransaction(ctx, updEntity.HistoryBalanceOperation)
+	hisResEntity, err := r.CreateNewBalanceHistoryTransaction(ctx, tr, &models.HistoryBalanceOperation{
+		UserID:                 entity.UserID,
+		OrderID:                entToUpdate.Order,
+		IsPositiveTransaction:  true,
+		AmountTransactionPoint: entToUpdate.Accrual,
+		BalancePoint:           entity.Point,
+	})
 	if err != nil {
 		return nil, err
 	}
-	resultEntity.HistoryBalanceOperation = hisResEntity
 	err = tr.Commit(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &resultEntity, nil
+	return hisResEntity, nil
 }
 
-func (r *BalanceRepository) BulkUpdateBalances(ctx context.Context, entToUpd []models.Balance) ([]models.Balance, error) {
-	tr, err := r.pool.Begin(ctx)
-	r.tx = tr
-	if err != nil {
-		return nil, err
-	}
-	const query = `UPDATE loyalty_system.balance SET point = $1 WHERE user_id = $2 RETURNING user_id, point;`
-	b := []models.Balance{}
-	for _, entry := range entToUpd {
-		entity := models.Balance{}
-		err = tr.QueryRow(ctx, query, entry.Point, entry.UserID).Scan(&entity.UserID, &entity.Point)
-		if err != nil {
-			return nil, err
-		}
-		hisResEntity, err := r.CreateNewBalanceHistoryTransaction(ctx, entry.HistoryBalanceOperation)
-		if err != nil {
-			return nil, err
-		}
-		entity.HistoryBalanceOperation = hisResEntity
-		b = append(b, entity)
-	}
-	err = tr.Commit(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
-}
-
-func (r *BalanceRepository) CreateNewBalanceHistoryTransaction(ctx context.Context, hisBalanceEntity *models.HistoryBalanceOperation) (*models.HistoryBalanceOperation, error) {
+func (r *BalanceRepository) CreateNewBalanceHistoryTransaction(ctx context.Context, tr pgx.Tx, hisBalanceEntity *models.HistoryBalanceOperation) (*models.HistoryBalanceOperation, error) {
 	const query = `INSERT INTO loyalty_system.history_balance_operation (user_id, order_id, is_positive_transaction, amount_transaction_point, balance_points) 
 			VALUES ($1, $2, $3, $4, $5) returning user_id, order_id, is_positive_transaction, amount_transaction_point, balance_points;`
 	entity := models.HistoryBalanceOperation{}
-	var err error
-	if r.tx != nil {
-		err = r.tx.
-			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.OrderID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
-			Scan(&entity.UserID, &entity.OrderID, &entity.IsPositiveTransaction, &entity.AmountTransactionPoint, &entity.BalancePoint)
-	} else {
-		err = r.pool.
-			QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.OrderID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
-			Scan(&entity.UserID, &entity.OrderID, &entity.IsPositiveTransaction, &entity.AmountTransactionPoint, &entity.BalancePoint)
-	}
+	err := tr.
+		QueryRow(ctx, query, hisBalanceEntity.UserID, hisBalanceEntity.OrderID, hisBalanceEntity.IsPositiveTransaction, hisBalanceEntity.AmountTransactionPoint, hisBalanceEntity.BalancePoint).
+		Scan(&entity.UserID, &entity.OrderID, &entity.IsPositiveTransaction, &entity.AmountTransactionPoint, &entity.BalancePoint)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +133,7 @@ func (r *BalanceRepository) GetWithDraws(ctx context.Context, userID uuid.UUID) 
 	err = rows.Err()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundRows
+			return nil, ErrorNotFoundBalanceRows
 		}
 		return nil, err
 	}
@@ -163,7 +169,7 @@ func (r *BalanceRepository) GetUserBalanceHistoryNegativeTransaction(ctx context
 	err = rows.Err()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundRows
+			return nil, ErrorNotFoundBalanceRows
 		}
 	}
 	return operations, nil
@@ -188,7 +194,7 @@ func (r *BalanceRepository) GetUsersBalances(ctx context.Context, userIDs []uuid
 	err = rows.Err()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundRows
+			return nil, ErrorNotFoundBalanceRows
 		}
 		return nil, err
 	}

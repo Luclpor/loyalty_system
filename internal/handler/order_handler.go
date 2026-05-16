@@ -4,12 +4,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
 	"github.com/Luclpor/loyalty_system.git/internal/handler/authHandler"
 	"github.com/Luclpor/loyalty_system.git/internal/service/order"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/go-chi/render"
 	"go.uber.org/zap"
 )
@@ -32,15 +30,15 @@ func CreateNewOrder(authService authHandler.UserAuthenticationService, orderMana
 		}
 		err = orderManager.SaveNewOrder(r.Context(), m)
 		if err != nil {
-			if errors.Is(err, appErrors.ErrorOrderAlreadyUploadSomeUser) {
+			if errors.Is(err, order.ErrorOrderAlreadyUploadSomeUser) {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			if errors.Is(err, appErrors.ErrorOrderAlreadyUploadThisUser) {
+			if errors.Is(err, order.ErrorOrderAlreadyUploadThisUser) {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			if errors.Is(err, appErrors.ErrorInvalidOrderNum) {
+			if errors.Is(err, order.ErrorInvalidOrderNum) {
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
 			}
@@ -62,7 +60,7 @@ func GetUserOrdersHandler(authService authHandler.UserAuthenticationService, ord
 		ords, err := orderManager.GetUserOrders(r.Context(), u.ID)
 		if err != nil {
 			appLogger.Error("failed to get user's orders", zap.Error(err))
-			if errors.Is(err, appErrors.ErrorInvalidOrderNum) {
+			if errors.Is(err, order.ErrorInvalidOrderNum) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -72,7 +70,7 @@ func GetUserOrdersHandler(authService authHandler.UserAuthenticationService, ord
 		readApi := make([]apiModel.ReadOrderApiModel, len(ords))
 		for i, o := range ords {
 			readApi[i] = apiModel.ReadOrderApiModel{
-				OrderNum:   strconv.Itoa(o.OrderNumber),
+				OrderNum:   o.OrderNumber,
 				Accrual:    o.Point,
 				Status:     o.Status,
 				UploadedAt: o.UploadedAt,

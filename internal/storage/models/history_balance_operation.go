@@ -9,7 +9,7 @@ import (
 type HistoryBalanceOperation struct {
 	ID                     int
 	UserID                 uuid.UUID
-	OrderID                int64
+	OrderID                string
 	IsPositiveTransaction  bool
 	AmountTransactionPoint *float64
 	BalancePoint           float64

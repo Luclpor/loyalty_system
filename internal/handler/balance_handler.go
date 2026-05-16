@@ -7,8 +7,9 @@ import (
 
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
 	"github.com/Luclpor/loyalty_system.git/internal/service/auth"
+	"github.com/Luclpor/loyalty_system.git/internal/service/order"
 	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
+	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	"github.com/go-chi/render"
 	"go.uber.org/zap"
 )
@@ -19,6 +20,7 @@ func WithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userBala
 		if err != nil {
 			appLogger.Error("failed to get user from context", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		balanceApi := apiModel.BalanceApi{}
@@ -28,14 +30,14 @@ func WithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userBala
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		wd, err := balanceManager.WithDrawUserBalance(r.Context(), &balanceApi, u, appLogger)
+		wd, err := balanceManager.WithdrawUserBalance(r.Context(), &balanceApi, u, appLogger)
 		if err != nil {
-			if errors.Is(err, appErrors.ErrorNotEnoughBalance) {
+			if errors.Is(err, userBalance.ErrorNotEnoughBalance) {
 				appLogger.Warn("not enough balance on user")
 				w.WriteHeader(http.StatusPaymentRequired)
 				return
 			}
-			if errors.Is(err, appErrors.ErrorInvalidOrderNum) {
+			if errors.Is(err, order.ErrorInvalidOrderNum) {
 				appLogger.Warn("invalid order num", zap.Error(err))
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
@@ -59,7 +61,7 @@ func GetWithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userB
 		withdraws, err := balanceManager.GetUserWithDraws(r.Context(), u.ID)
 		if err != nil {
 			appLogger.Error("error getting withdraws", zap.Error(err))
-			if errors.Is(err, appErrors.ErrorNotFoundRows) {
+			if errors.Is(err, postgres.ErrorNotFoundBalanceRows) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}

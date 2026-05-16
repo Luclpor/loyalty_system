@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,6 +14,10 @@ import (
 type OrderRepository struct {
 	pool *pgxpool.Pool
 }
+
+var (
+	ErrorNotFoundOrderRows = errors.New("order not found")
+)
 
 func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository {
 	return &OrderRepository{pool: pool}
@@ -32,13 +35,13 @@ func (or *OrderRepository) SaveOrder(ctx context.Context, order *models.Order) e
 	return nil
 }
 
-func (or *OrderRepository) GetOrderByID(ctx context.Context, orderID int64) (*models.Order, error) {
+func (or *OrderRepository) GetOrderByID(ctx context.Context, orderID string) (*models.Order, error) {
 	const query = `SELECT id, user_id, status, created_at FROM loyalty_system.order WHERE id = $1`
 	order := &models.Order{}
 	err := or.pool.QueryRow(ctx, query, orderID).Scan(&order.ID, &order.UserID, &order.Status, &order.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundRows
+			return nil, ErrorNotFoundOrderRows
 		}
 		return nil, err
 	}
@@ -69,23 +72,17 @@ func (or *OrderRepository) GetOrderByStatus(ctx context.Context, status string) 
 	return ords, nil
 }
 
-func (or *OrderRepository) UpdateOrdersStatus(ctx context.Context, entToUpd []models.Order) error {
-	tr, err := or.pool.Begin(ctx)
+func (or *OrderRepository) UpdateOrdersStatus(ctx context.Context, entToUpd *models.Order) (models.OrderStatus, error) {
+	var orderStatus models.OrderStatus
+	const query = `UPDATE loyalty_system.order SET status = $1 WHERE id = $2 AND status <> 'PROCESSED' RETURNING status;`
+	err := or.pool.QueryRow(ctx, query, entToUpd.Status, entToUpd.ID).Scan(&orderStatus)
 	if err != nil {
-		return err
-	}
-	const query = `UPDATE loyalty_system.order SET status = $1 WHERE id = $2;`
-	for _, ent := range entToUpd {
-		_, err = tr.Exec(ctx, query, ent.Status, ent.ID)
-		if err != nil {
-			return err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.UNKNOWN, nil
 		}
+		return models.UNKNOWN, err
 	}
-	err = tr.Commit(ctx)
-	if err != nil {
-		return err
-	}
-	return nil
+	return orderStatus, nil
 }
 
 func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
@@ -117,7 +114,7 @@ func (or *OrderRepository) GetOrdersByUserID(ctx context.Context, userID uuid.UU
 	}
 	if err = rows.Err(); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundRows
+			return nil, ErrorNotFoundOrderRows
 		}
 		return nil, err
 	}

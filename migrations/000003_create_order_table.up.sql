@@ -1,6 +1,6 @@
 create table if not exists loyalty_system.order
 (
-    id          bigint primary key,
+    id          varchar(112) primary key,
     user_id uuid not null,
     status varchar(12),
 

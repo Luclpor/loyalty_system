@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,6 +13,10 @@ type UserRepository struct {
 	pool       *pgxpool.Pool
 	balanceRep *BalanceRepository
 }
+
+var (
+	ErrorNotFoundUser = errors.New("user not found")
+)
 
 func NewUserRepository(pool *pgxpool.Pool, br *BalanceRepository) *UserRepository {
 	return &UserRepository{pool: pool, balanceRep: br}
@@ -55,7 +58,7 @@ func (ur *UserRepository) CheckExistLogin(ctx context.Context, login string) (*b
 	err := ur.pool.QueryRow(ctx, query, login).Scan(&exist)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundUser
+			return nil, ErrorNotFoundUser
 		}
 		return nil, err
 	}
@@ -71,7 +74,7 @@ func (ur *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mo
 	err := ur.pool.QueryRow(ctx, query, login).Scan(&u.ID, &u.Login, &u.Password)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, appErrors.ErrorNotFoundUser
+			return nil, ErrorNotFoundUser
 		}
 		return nil, err
 	}
