@@ -46,13 +46,13 @@ func (r *BalanceRepository) SafetyWithdrawUpdateBalance(ctx context.Context, wdD
 	}
 	defer tx.Rollback(ctx)
 	var point *float64
-	const query = `UPDATE loyalty_system.balance b SET b.point = b.point - $1 WHERE b.user_id = $2 AND b.point >= $1 RETURNING b.point;`
+	const query = `UPDATE loyalty_system.balance  SET point = point - $1 WHERE user_id = $2 AND point >= $1 RETURNING point;`
 	err = tx.QueryRow(ctx, query, wdDto.AmountPoint, wdDto.UserID).Scan(&point)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
-	}
-	if point == nil {
-		return nil, nil
 	}
 	hb, err := r.CreateNewBalanceHistoryTransaction(ctx, tx, &models.HistoryBalanceOperation{
 		UserID:                 wdDto.UserID,
