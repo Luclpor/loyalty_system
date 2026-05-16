@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
+//go:generate mockgen -source=order.go -destination=../../storage/mock/mock_order_repository.go -package=mock
+
 type OrderManager struct {
 	accrualSystemAddress string
 	NewOrderChan         chan *dto.OrderDto

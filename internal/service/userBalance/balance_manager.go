@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+//go:generate mockgen -source=balance_manager.go -destination=../../storage/mock/mock_balance_repository.go -package=mock
+
 type BalanceUpdater interface {
 	SafetyUpdateBalance(ctx context.Context, entToUpdate *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error)
 	SafetyWithdrawUpdateBalance(ctx context.Context, wdDto *balanceDto.WithdrawUpdateBalanceDto) (*models.HistoryBalanceOperation, error)

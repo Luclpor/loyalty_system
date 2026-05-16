@@ -6,17 +6,24 @@ import (
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
 	"github.com/Luclpor/loyalty_system.git/internal/service/auth/validator"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
-	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	"go.uber.org/zap"
 )
 
-func NewAuthService(jwtKey []byte, ur *postgres.UserRepository) (*UserAuth, error) {
+func NewAuthService(jwtKey []byte, ur UserRepository) (*UserAuth, error) {
 	return &UserAuth{jwtKey, ur}, nil
 }
 
+type UserRepository interface {
+	CreateUserAndBalance(ctx context.Context, login string, hashPassword string) (*models.User, error)
+	GetUserByLogin(ctx context.Context, login string) (*models.User, error)
+	CheckExistLogin(ctx context.Context, login string) (*bool, error)
+}
+
+//go:generate mockgen -source=user_registration.go -destination=../../storage/mock/mock_user_repository.go -package=mock
+
 type UserAuth struct {
 	jwtKey   []byte
-	userRepo *postgres.UserRepository
+	userRepo UserRepository
 }
 
 func (ua *UserAuth) RegisterUser(ctx context.Context, user *apiModel.User, appLogger *zap.Logger) (*models.User, error) {
