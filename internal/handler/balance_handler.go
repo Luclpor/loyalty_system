@@ -6,15 +6,14 @@ import (
 	"net/http"
 
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
-	"github.com/Luclpor/loyalty_system.git/internal/service/auth"
 	"github.com/Luclpor/loyalty_system.git/internal/service/order"
-	"github.com/Luclpor/loyalty_system.git/internal/service/userBalance"
+	userBalance "github.com/Luclpor/loyalty_system.git/internal/service/userBalance"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	"github.com/go-chi/render"
 	"go.uber.org/zap"
 )
 
-func WithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userBalance.BalanceManager, appLogger *zap.Logger) http.HandlerFunc {
+func WithdrawBalanceHandler(authService userContextGetter, balanceManager balanceManagerService, appLogger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := authService.GetUserFromContext(r.Context())
 		if err != nil {
@@ -51,12 +50,13 @@ func WithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userBala
 	}
 }
 
-func GetWithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userBalance.BalanceManager, appLogger *zap.Logger) http.HandlerFunc {
+func GetWithdrawBalanceHandler(authService userContextGetter, balanceManager balanceManagerService, appLogger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := authService.GetUserFromContext(r.Context())
 		if err != nil {
 			appLogger.Error("failed to get user from context", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		withdraws, err := balanceManager.GetUserWithDraws(r.Context(), u.ID)
 		if err != nil {
@@ -72,12 +72,13 @@ func GetWithdrawBalanceHandler(authService *auth.UserAuth, balanceManager *userB
 	}
 }
 
-func GetUserBalanceHandler(authService *auth.UserAuth, balanceManager *userBalance.BalanceManager, appLogger *zap.Logger) http.HandlerFunc {
+func GetUserBalanceHandler(authService userContextGetter, balanceManager balanceManagerService, appLogger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := authService.GetUserFromContext(r.Context())
 		if err != nil {
 			appLogger.Error("failed to get user from context", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		balance, err := balanceManager.GetUserBalance(r.Context(), u.ID)
 		if err != nil {

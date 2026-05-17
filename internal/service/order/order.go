@@ -78,6 +78,10 @@ func (om *OrderManager) UpdateOrder(ctx context.Context, dto *models.Order) (mod
 	return status, nil
 }
 
+func (om *OrderManager) OrderChan() <-chan *dto.OrderDto {
+	return om.NewOrderChan
+}
+
 func (om *OrderManager) GetUserOrders(ctx context.Context, userID uuid.UUID) ([]dto.OrderDto, error) {
 	ents, err := om.orderReader.GetOrdersByUserID(ctx, userID)
 	if err != nil {

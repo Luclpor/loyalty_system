@@ -21,13 +21,13 @@ import (
 )
 
 type WorkerOrder struct {
-	pauseWorkerController pauseWorkerController
-	extClient             *externalRtrClient
+	pauseWorkerController pauseController
+	extClient             externalResultClient
 	chQueueOrder          chan delayedOrder
 	numWorkers            int
 	accrualSystemAddress  string
-	balanceManager        *userBalance.BalanceManager
-	orderManager          *order.OrderManager
+	balanceManager        balanceManagerService
+	orderManager          orderManagerService
 	appLogger             *zap.Logger
 
 	cancel context.CancelFunc
@@ -84,12 +84,13 @@ func NewWorkerOrder(accrualSysAddress string, balanceManager *userBalance.Balanc
 		return nil, err
 	}
 	return &WorkerOrder{
-		extClient:            cl,
-		accrualSystemAddress: accrualSysAddress,
-		numWorkers:           5,
-		balanceManager:       balanceManager,
-		appLogger:            appLogger,
-		orderManager:         orderManager,
+		pauseWorkerController: &pauseWorkerController{},
+		extClient:             cl,
+		accrualSystemAddress:  accrualSysAddress,
+		numWorkers:            5,
+		balanceManager:        balanceManager,
+		appLogger:             appLogger,
+		orderManager:          orderManager,
 	}, nil
 }
 
@@ -164,6 +165,7 @@ func (p *WorkerOrder) enqueueDelayedOrder(ctx context.Context, order dto.OrderDt
 func (p *WorkerOrder) ProcessingOrders(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
+	orderCh := p.orderManager.OrderChan()
 
 	jobs := make(chan dto.OrderDto, p.numWorkers)
 	resultJob := make(chan *accrualStatusOrder.OrderDto, p.numWorkers)
@@ -198,10 +200,9 @@ func (p *WorkerOrder) ProcessingOrders(ctx context.Context) {
 			case <-ctx.Done():
 				p.appLogger.Info("worker order dispatcher stopped")
 				return
-			case j, ok := <-p.orderManager.NewOrderChan:
+			case j, ok := <-orderCh:
 				if !ok {
 					p.appLogger.Info("new order channel closed")
-					close(jobs)
 					return
 				}
 				if j == nil {
