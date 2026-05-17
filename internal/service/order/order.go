@@ -87,20 +87,21 @@ func (om *OrderManager) GetUserOrders(ctx context.Context, userID uuid.UUID) ([]
 	if err != nil {
 		return nil, err
 	}
-	orders := make([]dto.OrderDto, len(ents))
-	for i, ent := range ents {
+	orders := make([]dto.OrderDto, 0, len(ents))
+	for _, ent := range ents {
 		if ent.Transaction != nil && ent.Transaction.IsPositiveTransaction == false {
 			continue
 		}
-		orders[i] = dto.OrderDto{
+		orderDto := dto.OrderDto{
 			OrderNumber: ent.ID,
 			UserID:      ent.UserID,
 			Status:      string(ent.Status),
 			UploadedAt:  ent.CreatedAt,
 		}
 		if ent.Transaction != nil && ent.Transaction.AmountTransactionPoint != nil {
-			orders[i].Point = *ent.Transaction.AmountTransactionPoint
+			orderDto.Point = *ent.Transaction.AmountTransactionPoint
 		}
+		orders = append(orders, orderDto)
 	}
 	return orders, nil
 }
