@@ -8,8 +8,9 @@ import (
 
 	"github.com/Luclpor/loyalty_system.git/internal/dto"
 	"github.com/Luclpor/loyalty_system.git/internal/handler/apiModel"
+	"github.com/Luclpor/loyalty_system.git/internal/service/auth/validator"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
+	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -33,7 +34,7 @@ func UserRegistration(authService UserAuthenticationService, appLogger *zap.Logg
 		}
 		user, err := authService.RegisterUser(r.Context(), &model, appLogger)
 		if err != nil {
-			if errors.Is(err, appErrors.ErrorAlreadyExistUser) {
+			if errors.Is(err, validator.ErrorAlreadyExistUser) {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
@@ -48,7 +49,7 @@ func UserRegistration(authService UserAuthenticationService, appLogger *zap.Logg
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			w.Header().Set("Authorization", token)
+			w.Header().Set("Authorization", "Bearer "+token)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -68,7 +69,7 @@ func UserLogin(authService UserAuthenticationService, appLogger *zap.Logger) htt
 		}
 		u, err := authService.LoginUser(r.Context(), &model, appLogger)
 		if err != nil {
-			if errors.Is(err, appErrors.ErrorNotFoundUser) {
+			if errors.Is(err, postgres.ErrorNotFoundUser) {
 				appLogger.Warn("user not found")
 				w.WriteHeader(http.StatusUnauthorized)
 				return
@@ -83,7 +84,7 @@ func UserLogin(authService UserAuthenticationService, appLogger *zap.Logger) htt
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Authorization", token)
+		w.Header().Set("Authorization", "Bearer "+token)
 		w.WriteHeader(http.StatusOK)
 	}
 }

@@ -22,16 +22,16 @@ type Config struct {
 }
 
 type HTTPServer struct {
-	ServerAddress string `env:"SERVER_ADDRESS"`
-	BaseURL       string `env:"BASE_URL"`
-	StorageType   string `env:"STORAGE_TYPE"`
-	Postgres      *PostgresConfig
-	Timeout       time.Duration `env:"TIMEOUT" envDefault:"1555s"`
-	IdleTimeout   time.Duration
+	ServerAddress        string `env:"RUN_ADDRESS"`
+	BaseURL              string `env:"BASE_URL"`
+	AccrualSystemAddress string `env:"ACCRUAL_SYSTEM_ADDRESS"`
+	Postgres             *PostgresConfig
+	Timeout              time.Duration `env:"TIMEOUT" envDefault:"1555s"`
+	IdleTimeout          time.Duration
 }
 
 type PostgresConfig struct {
-	DataBaseDSN       string        `env:"DATABASE_DSN" envDefault:"postgres://postgres:mysecretpassword@localhost:5432/url_shortener?sslmode=disable"`
+	DataBaseDSN       string        `env:"DATABASE_URI" envDefault:"postgres://postgres:mysecretpassword@localhost:5432/url_shortener?sslmode=disable"`
 	MaxConns          int32         `env:"MAX_CONNS"`
 	MinConns          int32         `env:"MIN_CONNS"`
 	MaxConnLifetime   time.Duration `env:"MAX_CONN_LIFETIME"`
@@ -40,16 +40,18 @@ type PostgresConfig struct {
 }
 
 func InitConfig() (*Config, error) {
-	h := flag.String("a", "localhost:8080", "host address server")
+	h := flag.String("a", "localhost:8081", "host address server")
 	d := flag.String("d", "", "dsn connection to db")
+	r := flag.String("r", "http://localhost:8080", "accrual system address")
 
 	flag.Parse()
 
 	cfg := Config{
 		HTTPServer: HTTPServer{
-			ServerAddress: *h,
-			Timeout:       time.Second * 4,
-			IdleTimeout:   time.Second * 30,
+			ServerAddress:        *h,
+			Timeout:              time.Second * 4,
+			IdleTimeout:          time.Second * 30,
+			AccrualSystemAddress: *r,
 			Postgres: &PostgresConfig{
 				DataBaseDSN:       *d,
 				MaxConns:          30,

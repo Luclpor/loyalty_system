@@ -26,7 +26,7 @@ func Auth(authService UserAuthenticationMiddleware, appLogger *zap.Logger) func(
 			}
 			signedToken, err := extractBearerToken(tokenString)
 			if err != nil {
-				appLogger.Error("Authorization header invalid", zap.String("token", r.Header.Get("Authorization")))
+				appLogger.Error("failed to extract bearer token", zap.String("token", tokenString), zap.Error(err))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}

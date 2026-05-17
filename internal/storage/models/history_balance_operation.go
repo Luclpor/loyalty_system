@@ -1,0 +1,17 @@
+package models
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type HistoryBalanceOperation struct {
+	ID                     int
+	UserID                 uuid.UUID
+	OrderID                string
+	IsPositiveTransaction  bool
+	AmountTransactionPoint *float64
+	BalancePoint           float64
+	CreatedAt              time.Time
+}

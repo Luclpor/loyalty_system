@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/Luclpor/loyalty_system.git/internal/dto"
-	appErrors "github.com/Luclpor/loyalty_system.git/pkg/errors"
+	"github.com/Luclpor/loyalty_system.git/internal/storage/postgres"
 )
 
 type contextKey string
@@ -18,7 +18,7 @@ func (ua *UserAuth) SetUserOnContext(ctx context.Context, user *dto.UserDto) con
 func (ua *UserAuth) GetUserFromContext(ctx context.Context) (*dto.UserDto, error) {
 	user, ok := ctx.Value(userContextKey).(*dto.UserDto)
 	if !ok {
-		return nil, appErrors.ErrorNotFoundUser
+		return nil, postgres.ErrorNotFoundUser
 	}
 	return user, nil
 }
