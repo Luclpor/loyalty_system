@@ -20,6 +20,26 @@ import (
 	"go.uber.org/zap"
 )
 
+//go:generate mockgen -source=order_worker.go -destination=../mock/mock_order_dependencies.go -package=mock
+
+type balanceManagerService interface {
+	UpdateBalance(ctx context.Context, order *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error)
+}
+
+type orderManagerService interface {
+	UpdateOrder(ctx context.Context, dto *models.Order) (models.OrderStatus, error)
+	OrderChan() <-chan *dto.OrderDto
+}
+
+type pauseController interface {
+	Pause(dur time.Duration)
+	Wait(ctx context.Context) error
+}
+
+type externalResultClient interface {
+	getResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error)
+}
+
 type WorkerOrder struct {
 	pauseWorkerController pauseController
 	extClient             externalResultClient
