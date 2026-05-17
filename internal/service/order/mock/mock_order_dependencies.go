@@ -187,18 +187,18 @@ func (m *MockexternalResultClient) EXPECT() *MockexternalResultClientMockRecorde
 	return m.recorder
 }
 
-// getResultFromExternalSystem mocks base method.
-func (m *MockexternalResultClient) getResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
+// GetResultFromExternalSystem mocks base method.
+func (m *MockexternalResultClient) GetResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "getResultFromExternalSystem", ctx, order, appLogger)
+	ret := m.ctrl.Call(m, "GetResultFromExternalSystem", ctx, order, appLogger)
 	ret0, _ := ret[0].(*accrualStatusOrder.OrderDto)
 	ret1, _ := ret[1].(*time.Duration)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// getResultFromExternalSystem indicates an expected call of getResultFromExternalSystem.
-func (mr *MockexternalResultClientMockRecorder) getResultFromExternalSystem(ctx, order, appLogger any) *gomock.Call {
+// GetResultFromExternalSystem indicates an expected call of GetResultFromExternalSystem.
+func (mr *MockexternalResultClientMockRecorder) GetResultFromExternalSystem(ctx, order, appLogger any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "getResultFromExternalSystem", reflect.TypeOf((*MockexternalResultClient)(nil).getResultFromExternalSystem), ctx, order, appLogger)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetResultFromExternalSystem", reflect.TypeOf((*MockexternalResultClient)(nil).GetResultFromExternalSystem), ctx, order, appLogger)
 }

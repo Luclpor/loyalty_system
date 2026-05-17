@@ -10,61 +10,12 @@ import (
 
 	"github.com/Luclpor/loyalty_system.git/internal/service/order/dto"
 	"github.com/Luclpor/loyalty_system.git/internal/service/order/dto/accrualStatusOrder"
+	mockorder "github.com/Luclpor/loyalty_system.git/internal/service/order/mock"
 	"github.com/Luclpor/loyalty_system.git/internal/storage/models"
 	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
-
-type fakePauseController struct {
-	waitFn   func(ctx context.Context) error
-	pauseDur []time.Duration
-}
-
-func (f *fakePauseController) Pause(dur time.Duration) {
-	f.pauseDur = append(f.pauseDur, dur)
-}
-
-func (f *fakePauseController) Wait(ctx context.Context) error {
-	if f.waitFn != nil {
-		return f.waitFn(ctx)
-	}
-	return nil
-}
-
-type fakeExternalClient struct {
-	getResultFn func(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error)
-}
-
-func (f *fakeExternalClient) getResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-	return f.getResultFn(ctx, order, appLogger)
-}
-
-type fakeBalanceManager struct {
-	updateBalanceFn func(ctx context.Context, order *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error)
-}
-
-func (f *fakeBalanceManager) UpdateBalance(ctx context.Context, order *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-	if f.updateBalanceFn == nil {
-		return nil, nil
-	}
-	return f.updateBalanceFn(ctx, order)
-}
-
-type fakeOrderManager struct {
-	updateOrderFn func(ctx context.Context, order *models.Order) (models.OrderStatus, error)
-	orderCh       chan *dto.OrderDto
-}
-
-func (f *fakeOrderManager) UpdateOrder(ctx context.Context, order *models.Order) (models.OrderStatus, error) {
-	if f.updateOrderFn == nil {
-		return models.UNKNOWN, nil
-	}
-	return f.updateOrderFn(ctx, order)
-}
-
-func (f *fakeOrderManager) OrderChan() <-chan *dto.OrderDto {
-	return f.orderCh
-}
 
 func TestNewWorkerOrderInvalidURL(t *testing.T) {
 	t.Parallel()
@@ -98,7 +49,7 @@ func TestExternalRtrClientGetResultFromExternalSystem(t *testing.T) {
 		t.Fatalf("failed to create retryable client: %v", err)
 	}
 
-	got, retryAfter, err := client.getResultFromExternalSystem(context.Background(), dto.OrderDto{
+	got, retryAfter, err := client.GetResultFromExternalSystem(context.Background(), dto.OrderDto{
 		OrderNumber: "79927398713",
 		UserID:      userID,
 	}, zap.NewNop())
@@ -139,7 +90,7 @@ func TestExternalRtrClientGetResultFromExternalSystemRetryAfter(t *testing.T) {
 		t.Fatalf("failed to create retryable client: %v", err)
 	}
 
-	got, retryAfter, err := client.getResultFromExternalSystem(context.Background(), dto.OrderDto{
+	got, retryAfter, err := client.GetResultFromExternalSystem(context.Background(), dto.OrderDto{
 		OrderNumber: "79927398713",
 		UserID:      uuid.New(),
 	}, zap.NewNop())
@@ -168,7 +119,7 @@ func TestExternalRtrClientGetResultFromExternalSystemInvalidRetryAfter(t *testin
 		t.Fatalf("failed to create retryable client: %v", err)
 	}
 
-	got, retryAfter, err := client.getResultFromExternalSystem(context.Background(), dto.OrderDto{
+	got, retryAfter, err := client.GetResultFromExternalSystem(context.Background(), dto.OrderDto{
 		OrderNumber: "79927398713",
 		UserID:      uuid.New(),
 	}, zap.NewNop())
@@ -193,7 +144,7 @@ func TestExternalRtrClientGetResultFromExternalSystemUnexpectedStatus(t *testing
 		t.Fatalf("failed to create retryable client: %v", err)
 	}
 
-	got, retryAfter, err := client.getResultFromExternalSystem(context.Background(), dto.OrderDto{
+	got, retryAfter, err := client.GetResultFromExternalSystem(context.Background(), dto.OrderDto{
 		OrderNumber: "79927398713",
 		UserID:      uuid.New(),
 	}, zap.NewNop())
@@ -218,7 +169,7 @@ func TestExternalRtrClientGetResultFromExternalSystemInvalidJSON(t *testing.T) {
 		t.Fatalf("failed to create retryable client: %v", err)
 	}
 
-	got, retryAfter, err := client.getResultFromExternalSystem(context.Background(), dto.OrderDto{
+	got, retryAfter, err := client.GetResultFromExternalSystem(context.Background(), dto.OrderDto{
 		OrderNumber: "79927398713",
 		UserID:      uuid.New(),
 	}, zap.NewNop())
@@ -233,16 +184,14 @@ func TestExternalRtrClientGetResultFromExternalSystemInvalidJSON(t *testing.T) {
 func TestHandleEvaluatingOrdersInvalidStatusSkipsManagers(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
+
 	worker := &WorkerOrder{
-		orderManager: &fakeOrderManager{updateOrderFn: func(context.Context, *models.Order) (models.OrderStatus, error) {
-			t.Fatal("order manager should not be called")
-			return models.UNKNOWN, nil
-		}},
-		balanceManager: &fakeBalanceManager{updateBalanceFn: func(context.Context, *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-			t.Fatal("balance manager should not be called")
-			return nil, nil
-		}},
-		appLogger: zap.NewNop(),
+		orderManager:   orderManager,
+		balanceManager: balanceManager,
+		appLogger:      zap.NewNop(),
 	}
 
 	worker.HandleEvaluatingOrders(context.Background(), &accrualStatusOrder.OrderDto{
@@ -255,20 +204,27 @@ func TestHandleEvaluatingOrdersInvalidStatusSkipsManagers(t *testing.T) {
 func TestHandleEvaluatingOrdersUpdateOrderErrorSkipsBalance(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
 	expectedErr := errors.New("update failed")
+
+	orderManager.EXPECT().
+		UpdateOrder(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
+			if got.ID != "79927398713" {
+				t.Fatalf("unexpected order id: got %q", got.ID)
+			}
+			if got.Status != models.PROCESSED {
+				t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSED)
+			}
+			return models.UNKNOWN, expectedErr
+		})
+
 	worker := &WorkerOrder{
-		orderManager: &fakeOrderManager{
-			updateOrderFn: func(context.Context, *models.Order) (models.OrderStatus, error) {
-				return models.UNKNOWN, expectedErr
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(context.Context, *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				t.Fatal("balance manager should not be called on update error")
-				return nil, nil
-			},
-		},
-		appLogger: zap.NewNop(),
+		orderManager:   orderManager,
+		balanceManager: balanceManager,
+		appLogger:      zap.NewNop(),
 	}
 
 	worker.HandleEvaluatingOrders(context.Background(), &accrualStatusOrder.OrderDto{
@@ -281,22 +237,23 @@ func TestHandleEvaluatingOrdersUpdateOrderErrorSkipsBalance(t *testing.T) {
 func TestHandleEvaluatingOrdersUnknownStatusSkipsBalance(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
+
+	orderManager.EXPECT().
+		UpdateOrder(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
+			if got.Status != models.PROCESSED {
+				t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSED)
+			}
+			return models.UNKNOWN, nil
+		})
+
 	worker := &WorkerOrder{
-		orderManager: &fakeOrderManager{
-			updateOrderFn: func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
-				if got.Status != models.PROCESSED {
-					t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSED)
-				}
-				return models.UNKNOWN, nil
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(context.Context, *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				t.Fatal("balance manager should not be called for unknown order status")
-				return nil, nil
-			},
-		},
-		appLogger: zap.NewNop(),
+		orderManager:   orderManager,
+		balanceManager: balanceManager,
+		appLogger:      zap.NewNop(),
 	}
 
 	worker.HandleEvaluatingOrders(context.Background(), &accrualStatusOrder.OrderDto{
@@ -309,43 +266,46 @@ func TestHandleEvaluatingOrdersUnknownStatusSkipsBalance(t *testing.T) {
 func TestHandleEvaluatingOrdersProcessedUpdatesBalance(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
 	userID := uuid.New()
 	accrual := 55.5
-	history := &models.HistoryBalanceOperation{
-		UserID:                 userID,
-		OrderID:                "79927398713",
-		AmountTransactionPoint: &accrual,
-	}
-	balanceCalled := false
+
+	orderManager.EXPECT().
+		UpdateOrder(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
+			if got.ID != "79927398713" {
+				t.Fatalf("unexpected order id: got %q", got.ID)
+			}
+			if got.Status != models.PROCESSED {
+				t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSED)
+			}
+			return models.PROCESSED, nil
+		})
+	balanceManager.EXPECT().
+		UpdateBalance(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
+			if got.Order != "79927398713" {
+				t.Fatalf("unexpected order in balance update: got %q", got.Order)
+			}
+			if got.UserID != userID {
+				t.Fatalf("unexpected user id: got %s want %s", got.UserID, userID)
+			}
+			if got.Accrual == nil || *got.Accrual != accrual {
+				t.Fatalf("unexpected accrual: got %v", got.Accrual)
+			}
+			return &models.HistoryBalanceOperation{
+				UserID:                 userID,
+				OrderID:                got.Order,
+				AmountTransactionPoint: got.Accrual,
+			}, nil
+		})
 
 	worker := &WorkerOrder{
-		orderManager: &fakeOrderManager{
-			updateOrderFn: func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
-				if got.ID != "79927398713" {
-					t.Fatalf("unexpected order id: got %q", got.ID)
-				}
-				if got.Status != models.PROCESSED {
-					t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSED)
-				}
-				return models.PROCESSED, nil
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(_ context.Context, got *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				balanceCalled = true
-				if got.Order != "79927398713" {
-					t.Fatalf("unexpected order in balance update: got %q", got.Order)
-				}
-				if got.UserID != userID {
-					t.Fatalf("unexpected user id: got %s want %s", got.UserID, userID)
-				}
-				if got.Accrual == nil || *got.Accrual != accrual {
-					t.Fatalf("unexpected accrual: got %v", got.Accrual)
-				}
-				return history, nil
-			},
-		},
-		appLogger: zap.NewNop(),
+		orderManager:   orderManager,
+		balanceManager: balanceManager,
+		appLogger:      zap.NewNop(),
 	}
 
 	worker.HandleEvaluatingOrders(context.Background(), &accrualStatusOrder.OrderDto{
@@ -354,31 +314,28 @@ func TestHandleEvaluatingOrdersProcessedUpdatesBalance(t *testing.T) {
 		Status:  accrualStatusOrder.PROCESSED,
 		Accrual: &accrual,
 	})
-
-	if !balanceCalled {
-		t.Fatal("expected balance update to be called")
-	}
 }
 
 func TestHandleEvaluatingOrdersProcessingStatusDoesNotUpdateBalance(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
+
+	orderManager.EXPECT().
+		UpdateOrder(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
+			if got.Status != models.PROCESSING {
+				t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSING)
+			}
+			return models.PROCESSING, nil
+		})
+
 	worker := &WorkerOrder{
-		orderManager: &fakeOrderManager{
-			updateOrderFn: func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
-				if got.Status != models.PROCESSING {
-					t.Fatalf("unexpected converted status: got %s want %s", got.Status, models.PROCESSING)
-				}
-				return models.PROCESSING, nil
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(context.Context, *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				t.Fatal("balance manager should not be called for processing status")
-				return nil, nil
-			},
-		},
-		appLogger: zap.NewNop(),
+		orderManager:   orderManager,
+		balanceManager: balanceManager,
+		appLogger:      zap.NewNop(),
 	}
 
 	worker.HandleEvaluatingOrders(context.Background(), &accrualStatusOrder.OrderDto{
@@ -431,6 +388,9 @@ func TestRunDelayedJobSendsOrder(t *testing.T) {
 func TestWorkerOrderExternalErrorEnqueuesDelayedOrder(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	pause := mockorder.NewMockpauseController(ctrl)
+	extClient := mockorder.NewMockexternalResultClient(ctrl)
 	job := make(chan dto.OrderDto, 1)
 	resultJob := make(chan *accrualStatusOrder.OrderDto, 1)
 	queue := make(chan delayedOrder, 1)
@@ -438,15 +398,16 @@ func TestWorkerOrderExternalErrorEnqueuesDelayedOrder(t *testing.T) {
 	job <- orderDto
 	close(job)
 
+	pause.EXPECT().Wait(gomock.Any()).Return(nil)
+	extClient.EXPECT().
+		GetResultFromExternalSystem(gomock.Any(), orderDto, gomock.Any()).
+		Return(nil, nil, errors.New("external failure"))
+
 	worker := &WorkerOrder{
-		pauseWorkerController: &fakePauseController{},
-		extClient: &fakeExternalClient{
-			getResultFn: func(context.Context, dto.OrderDto, *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				return nil, nil, errors.New("external failure")
-			},
-		},
-		chQueueOrder: queue,
-		appLogger:    zap.NewNop(),
+		pauseWorkerController: pause,
+		extClient:             extClient,
+		chQueueOrder:          queue,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.WorkerOrder(context.Background(), job, resultJob)
@@ -473,32 +434,31 @@ func TestWorkerOrderExternalErrorEnqueuesDelayedOrder(t *testing.T) {
 func TestWorkerOrderRetryAfterPausesAndEnqueuesDelayedOrder(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	pause := mockorder.NewMockpauseController(ctrl)
+	extClient := mockorder.NewMockexternalResultClient(ctrl)
 	job := make(chan dto.OrderDto, 1)
 	resultJob := make(chan *accrualStatusOrder.OrderDto, 1)
 	queue := make(chan delayedOrder, 1)
 	orderDto := dto.OrderDto{OrderNumber: "79927398713", UserID: uuid.New()}
 	retryAfter := 4 * time.Second
-	pause := &fakePauseController{}
-
 	job <- orderDto
 	close(job)
 
+	pause.EXPECT().Wait(gomock.Any()).Return(nil)
+	pause.EXPECT().Pause(retryAfter)
+	extClient.EXPECT().
+		GetResultFromExternalSystem(gomock.Any(), orderDto, gomock.Any()).
+		Return(nil, &retryAfter, nil)
+
 	worker := &WorkerOrder{
 		pauseWorkerController: pause,
-		extClient: &fakeExternalClient{
-			getResultFn: func(context.Context, dto.OrderDto, *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				return nil, &retryAfter, nil
-			},
-		},
-		chQueueOrder: queue,
-		appLogger:    zap.NewNop(),
+		extClient:             extClient,
+		chQueueOrder:          queue,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.WorkerOrder(context.Background(), job, resultJob)
-
-	if len(pause.pauseDur) != 1 || pause.pauseDur[0] != retryAfter {
-		t.Fatalf("unexpected pause calls: got %v want [%v]", pause.pauseDur, retryAfter)
-	}
 
 	select {
 	case got := <-queue:
@@ -513,6 +473,9 @@ func TestWorkerOrderRetryAfterPausesAndEnqueuesDelayedOrder(t *testing.T) {
 func TestWorkerOrderRegisteredOrderSendsResultAndRequeues(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	pause := mockorder.NewMockpauseController(ctrl)
+	extClient := mockorder.NewMockexternalResultClient(ctrl)
 	job := make(chan dto.OrderDto, 1)
 	resultJob := make(chan *accrualStatusOrder.OrderDto, 1)
 	queue := make(chan delayedOrder, 1)
@@ -522,19 +485,19 @@ func TestWorkerOrderRegisteredOrderSendsResultAndRequeues(t *testing.T) {
 		UserID: orderDto.UserID,
 		Status: accrualStatusOrder.REGISTERED,
 	}
-
 	job <- orderDto
 	close(job)
 
+	pause.EXPECT().Wait(gomock.Any()).Return(nil)
+	extClient.EXPECT().
+		GetResultFromExternalSystem(gomock.Any(), orderDto, gomock.Any()).
+		Return(respDto, nil, nil)
+
 	worker := &WorkerOrder{
-		pauseWorkerController: &fakePauseController{},
-		extClient: &fakeExternalClient{
-			getResultFn: func(context.Context, dto.OrderDto, *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				return respDto, nil, nil
-			},
-		},
-		chQueueOrder: queue,
-		appLogger:    zap.NewNop(),
+		pauseWorkerController: pause,
+		extClient:             extClient,
+		chQueueOrder:          queue,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.WorkerOrder(context.Background(), job, resultJob)
@@ -561,6 +524,9 @@ func TestWorkerOrderRegisteredOrderSendsResultAndRequeues(t *testing.T) {
 func TestWorkerOrderProcessedOrderSendsResultOnly(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	pause := mockorder.NewMockpauseController(ctrl)
+	extClient := mockorder.NewMockexternalResultClient(ctrl)
 	job := make(chan dto.OrderDto, 1)
 	resultJob := make(chan *accrualStatusOrder.OrderDto, 1)
 	queue := make(chan delayedOrder, 1)
@@ -572,19 +538,19 @@ func TestWorkerOrderProcessedOrderSendsResultOnly(t *testing.T) {
 		Status:  accrualStatusOrder.PROCESSED,
 		Accrual: &accrual,
 	}
-
 	job <- orderDto
 	close(job)
 
+	pause.EXPECT().Wait(gomock.Any()).Return(nil)
+	extClient.EXPECT().
+		GetResultFromExternalSystem(gomock.Any(), orderDto, gomock.Any()).
+		Return(respDto, nil, nil)
+
 	worker := &WorkerOrder{
-		pauseWorkerController: &fakePauseController{},
-		extClient: &fakeExternalClient{
-			getResultFn: func(context.Context, dto.OrderDto, *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				return respDto, nil, nil
-			},
-		},
-		chQueueOrder: queue,
-		appLogger:    zap.NewNop(),
+		pauseWorkerController: pause,
+		extClient:             extClient,
+		chQueueOrder:          queue,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.WorkerOrder(context.Background(), job, resultJob)
@@ -608,59 +574,69 @@ func TestWorkerOrderProcessedOrderSendsResultOnly(t *testing.T) {
 func TestProcessingOrdersEndToEnd(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	pause := mockorder.NewMockpauseController(ctrl)
+	extClient := mockorder.NewMockexternalResultClient(ctrl)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
+	balanceManager := mockorder.NewMockbalanceManagerService(ctrl)
 	userID := uuid.New()
 	accrual := 64.5
 	orderCh := make(chan *dto.OrderDto, 1)
 	balanceUpdated := make(chan struct{}, 1)
 
+	orderManager.EXPECT().OrderChan().Return((<-chan *dto.OrderDto)(orderCh))
+	pause.EXPECT().Wait(gomock.Any()).Return(nil)
+	extClient.EXPECT().
+		GetResultFromExternalSystem(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got dto.OrderDto, _ *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
+			if got.OrderNumber != "79927398713" {
+				t.Fatalf("unexpected order number from worker: got %q", got.OrderNumber)
+			}
+			return &accrualStatusOrder.OrderDto{
+				Order:   got.OrderNumber,
+				UserID:  got.UserID,
+				Status:  accrualStatusOrder.PROCESSED,
+				Accrual: &accrual,
+			}, nil, nil
+		})
+	orderManager.EXPECT().
+		UpdateOrder(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
+			if got.ID != "79927398713" {
+				t.Fatalf("unexpected updated order id: got %q", got.ID)
+			}
+			if got.Status != models.PROCESSED {
+				t.Fatalf("unexpected updated status: got %s want %s", got.Status, models.PROCESSED)
+			}
+			return models.PROCESSED, nil
+		})
+	balanceManager.EXPECT().
+		UpdateBalance(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, got *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
+			if got.UserID != userID {
+				t.Fatalf("unexpected user id in balance update: got %s want %s", got.UserID, userID)
+			}
+			if got.Order != "79927398713" {
+				t.Fatalf("unexpected order in balance update: got %q", got.Order)
+			}
+			select {
+			case balanceUpdated <- struct{}{}:
+			default:
+			}
+			return &models.HistoryBalanceOperation{
+				UserID:                 got.UserID,
+				OrderID:                got.Order,
+				AmountTransactionPoint: got.Accrual,
+			}, nil
+		})
+
 	worker := &WorkerOrder{
-		pauseWorkerController: &fakePauseController{},
-		extClient: &fakeExternalClient{
-			getResultFn: func(_ context.Context, got dto.OrderDto, _ *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				if got.OrderNumber != "79927398713" {
-					t.Fatalf("unexpected order number from worker: got %q", got.OrderNumber)
-				}
-				return &accrualStatusOrder.OrderDto{
-					Order:   got.OrderNumber,
-					UserID:  got.UserID,
-					Status:  accrualStatusOrder.PROCESSED,
-					Accrual: &accrual,
-				}, nil, nil
-			},
-		},
-		orderManager: &fakeOrderManager{
-			orderCh: orderCh,
-			updateOrderFn: func(_ context.Context, got *models.Order) (models.OrderStatus, error) {
-				if got.ID != "79927398713" {
-					t.Fatalf("unexpected updated order id: got %q", got.ID)
-				}
-				if got.Status != models.PROCESSED {
-					t.Fatalf("unexpected updated status: got %s want %s", got.Status, models.PROCESSED)
-				}
-				return models.PROCESSED, nil
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(_ context.Context, got *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				if got.UserID != userID {
-					t.Fatalf("unexpected user id in balance update: got %s want %s", got.UserID, userID)
-				}
-				if got.Order != "79927398713" {
-					t.Fatalf("unexpected order in balance update: got %q", got.Order)
-				}
-				select {
-				case balanceUpdated <- struct{}{}:
-				default:
-				}
-				return &models.HistoryBalanceOperation{
-					UserID:                 got.UserID,
-					OrderID:                got.Order,
-					AmountTransactionPoint: got.Accrual,
-				}, nil
-			},
-		},
-		numWorkers: 1,
-		appLogger:  zap.NewNop(),
+		pauseWorkerController: pause,
+		extClient:             extClient,
+		orderManager:          orderManager,
+		balanceManager:        balanceManager,
+		numWorkers:            1,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.ProcessingOrders(context.Background())
@@ -682,32 +658,20 @@ func TestProcessingOrdersEndToEnd(t *testing.T) {
 func TestProcessingOrdersClosedOrderChannelStopsGracefully(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	orderManager := mockorder.NewMockorderManagerService(ctrl)
 	orderCh := make(chan *dto.OrderDto)
 	close(orderCh)
 
+	orderManager.EXPECT().OrderChan().Return((<-chan *dto.OrderDto)(orderCh))
+
 	worker := &WorkerOrder{
-		pauseWorkerController: &fakePauseController{},
-		extClient: &fakeExternalClient{
-			getResultFn: func(context.Context, dto.OrderDto, *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error) {
-				t.Fatal("external client should not be called when order channel is already closed")
-				return nil, nil, nil
-			},
-		},
-		orderManager: &fakeOrderManager{
-			orderCh: orderCh,
-			updateOrderFn: func(context.Context, *models.Order) (models.OrderStatus, error) {
-				t.Fatal("order manager update should not be called when order channel is closed")
-				return models.UNKNOWN, nil
-			},
-		},
-		balanceManager: &fakeBalanceManager{
-			updateBalanceFn: func(context.Context, *accrualStatusOrder.OrderDto) (*models.HistoryBalanceOperation, error) {
-				t.Fatal("balance manager should not be called when order channel is closed")
-				return nil, nil
-			},
-		},
-		numWorkers: 1,
-		appLogger:  zap.NewNop(),
+		pauseWorkerController: mockorder.NewMockpauseController(ctrl),
+		extClient:             mockorder.NewMockexternalResultClient(ctrl),
+		orderManager:          orderManager,
+		balanceManager:        mockorder.NewMockbalanceManagerService(ctrl),
+		numWorkers:            1,
+		appLogger:             zap.NewNop(),
 	}
 
 	worker.ProcessingOrders(context.Background())

@@ -37,7 +37,7 @@ type pauseController interface {
 }
 
 type externalResultClient interface {
-	getResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error)
+	GetResultFromExternalSystem(ctx context.Context, order dto.OrderDto, appLogger *zap.Logger) (*accrualStatusOrder.OrderDto, *time.Duration, error)
 }
 
 type WorkerOrder struct {
@@ -127,7 +127,7 @@ func (p *WorkerOrder) WorkerOrder(ctx context.Context, job chan dto.OrderDto, re
 				p.appLogger.Error("worker pause interrupted", zap.Error(err))
 				continue
 			}
-			respDto, retryAfter, err := p.extClient.getResultFromExternalSystem(
+			respDto, retryAfter, err := p.extClient.GetResultFromExternalSystem(
 				ctx,
 				j,
 				p.appLogger,
@@ -294,7 +294,7 @@ func (p *WorkerOrder) HandleEvaluatingOrders(ctx context.Context, order *accrual
 	}
 }
 
-func (ex *externalRtrClient) getResultFromExternalSystem(
+func (ex *externalRtrClient) GetResultFromExternalSystem(
 	ctx context.Context,
 	order dto.OrderDto,
 	appLogger *zap.Logger,
